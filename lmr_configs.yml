@@ -18,7 +18,7 @@
 # (DaveEdge1/presto-LMR-presto2k): 0-2010, 10 Monte Carlo seeds, 100 members.
 
 recon_period: [0, 2010]
-recon_seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+recon_seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]   # 20 Monte Carlo iterations, as in LMRv2.1 (rerun 2026-11-18)
 nens: 100
 assim_frac: 0.75
 recon_loc_rad: 25000
@@ -80,7 +80,7 @@ ptype_season_dict:
 
 # Run the 10 seeds as 2 parallel jobs of 5 (cfr-custom.yml); one job of 10 (~24 min a seed)
 # exceeds the 240-min job limit.
-presto_seed_jobs: 2
+presto_seed_jobs: 4
 
 # PReSto checks after PSM calibration (LMR2 pool-bundles 42c7271, 4ab0d27).
 # interpretation_screen: a record is dropped when its calibration contradicts
