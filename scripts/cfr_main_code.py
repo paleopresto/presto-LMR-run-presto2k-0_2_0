@@ -119,6 +119,14 @@ job_cfg.prep_da_cfg('/tmp/merged_config.yml', verbose=True)
 #     calibration season gives a slope of that sign. cfr picks the season by
 #     adjusted R2 alone; when its pick has the wrong sign, the record is
 #     recalibrated on the best season that has the right one.
+#   - it is calibrated on temperature and no interpretation gives its
+#     temperature sign, even after the implied signs below (a coral d13C whose
+#     temperature direction reads "decrease/increase"): such a record is
+#     dropped rather than left to fit either sign (Nick, 2026-11-19; the same
+#     rule as presto-recipes' BayGMST screen, 735d28a).
+# A temperature interpretation with no direction takes the sign implied by
+# its direction text ("T_air (positive), P_amount (negative)"), its variable
+# name (a calibrated temperature series) or its proxy class (IMPLIED_TAS_SIGN).
 # A record with no interpretation whose variable is itself a climate variable
 # (a "precipitation" or "PDSI" reconstruction) is treated as interpreted as
 # that variable, positively. Any other record with no interpretation is left
@@ -134,6 +142,27 @@ INTERP_CLASSES = [
     (r'drought', 'pr', None),
     (r'precip|moisture|pdsi|spei|^spi$|humid|^p-e$|^p_e$|rain|streamflow|runoff|wet', 'pr', 1),
 ]
+
+
+# Temperature sign implied by the proxy class, for temperature
+# interpretations that record none: ring width and density grow with
+# temperature (PAGES 2k 2017 admitted only positively responding series), ice
+# water isotopes rise with it, and coral, sclerosponge and bivalve d18O and
+# Sr/Ca fall with it.
+IMPLIED_TAS_SIGN = {
+    'tree.TRW': 1, 'tree.MXD': 1, 'ice.d18O': 1, 'ice.dD': 1,
+    'coral.d18O': -1, 'coral.SrCa': -1, 'sclerosponge.d18O': -1, 'sclerosponge.SrCa': -1,
+    'bivalve.d18O': -1,
+}
+
+
+def _implied_tas_sign(direction_text, value_name, ptype):
+    m = re.search(r'(t_air|temperature|\btemp\b|sst)\s*\((positive|negative)\)', str(direction_text or '').lower())
+    if m:
+        return 1 if m.group(2) == 'positive' else -1
+    if re.fullmatch(r'temperature|sst', str(value_name or '').lower().strip()):
+        return 1
+    return IMPLIED_TAS_SIGN.get(ptype)
 
 
 def _interp_class(variable):
@@ -194,6 +223,15 @@ def screen_interpretations(job, df, clim_dict, out_csv):
         psm_vars = list(clim_dict.get(pobj.ptype, ['tas']))
         ii = json.loads(interp.get(str(pid)) or '[]')
         classes = [(i['variable'],) + _interp_class(i['variable']) + (_direction(i['direction']),) for i in ii]
+        filled = False
+        if any(c[1] == 'tas' and c[2] is not None and c[3] is None for c in classes) and \
+                not any(c[1] == 'tas' and c[2] is not None and c[3] is not None for c in classes):
+            # no temperature interpretation gives a sign: take the implied one
+            texts = ' '.join(str(i.get('direction') or '') for i in ii)
+            sg = _implied_tas_sign(texts, pobj.value_name, pobj.ptype)
+            if sg is not None:
+                classes = [c[:3] + (sg * c[2],) if c[1] == 'tas' and c[3] is None else c for c in classes]
+                filled = True
         implied = False
         if not classes:
             var, sign = _interp_class(pobj.value_name or '')
@@ -201,6 +239,8 @@ def screen_interpretations(job, df, clim_dict, out_csv):
                 classes, implied = [(str(pobj.value_name), var, sign, 1)], True
         matched = [c for c in classes if c[1] in psm_vars]
         status, detail = 'pass', 'interpretation implied by variable name;' if implied else ''
+        if filled:
+            detail += 'temperature sign implied;'
         season0 = pobj.psm.calib_details['seasonality']
         if not classes:
             status = 'uninterpreted'
@@ -217,7 +257,12 @@ def screen_interpretations(job, df, clim_dict, out_csv):
                     expected[var] = exp.pop()
                 elif len(exp) > 1:
                     detail += f'{var}: conflicting directions, not checked;'
-            if expected and not _signs_ok(pobj.psm.model, expected):
+            if 'tas' in psm_vars and 'tas' not in expected and \
+                    any(c[1] == 'tas' and c[2] is not None for c in matched) and \
+                    not any(c[1] == 'tas' and c[2] is not None and c[3] is not None for c in matched):
+                status = 'drop_unsigned'
+                detail += 'temperature interpretation gives no sign;'
+            elif expected and not _signs_ok(pobj.psm.model, expected):
                 sn = _refit_signed(pobj, expected, season_dict.get(pobj.ptype, [list(range(1, 13))]), calib_period)
                 if sn is None:
                     status = 'drop_direction'
